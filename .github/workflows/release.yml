@@ -50,8 +50,12 @@ jobs:
         with:
           version: 0.15.1
 
-      - name: Build with cargo zigbuild
-        # Note: on Windows MSVC, cargo zigbuild will fallback to cargo build seamlessly.
+      - name: Build with cargo (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build with cargo zigbuild (Unix)
+        if: matrix.os != 'windows-latest'
         run: cargo zigbuild --release --target ${{ matrix.target }}
 
       - name: Prepare Assets
