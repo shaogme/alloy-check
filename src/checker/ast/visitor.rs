@@ -13,6 +13,7 @@ pub(crate) struct AstVisitor<'a> {
     pub source_text: &'a str,
     pub in_test_ctx: bool,
     pub in_trait_impl: bool,
+    pub in_const_ctx: bool,
 }
 
 impl<'a> AstVisitor<'a> {
@@ -24,6 +25,7 @@ impl<'a> AstVisitor<'a> {
             source_text,
             in_test_ctx: false,
             in_trait_impl: false,
+            in_const_ctx: false,
         }
     }
 
@@ -296,7 +298,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
 
     fn visit_expr_method_call(&mut self, i: &'ast syn::ExprMethodCall) {
         let m = i.method.to_string();
-        if (m == "unwrap" || m == "expect") && !self.in_test_ctx {
+        if (m == "unwrap" || m == "expect") && !self.in_test_ctx && !self.in_const_ctx {
             let s = i.method.span().start();
             let msg = format!("Use of `.{}` is prohibited in non-test code.", m);
             self.report.add(
@@ -324,7 +326,10 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             || path_str == "std::unimplemented"
             || path_str == "core::unimplemented";
 
-        if (is_panic || is_unreachable || is_todo || is_unimplemented) && !self.in_test_ctx {
+        if (is_panic || is_unreachable || is_todo || is_unimplemented)
+            && !self.in_test_ctx
+            && !self.in_const_ctx
+        {
             let s = i.path.span().start();
             self.report.add(
                 Diag::error(
@@ -377,6 +382,20 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         );
         visit::visit_item_fn(self, i);
         self.in_test_ctx = prev;
+    }
+ 
+    fn visit_item_const(&mut self, i: &'ast syn::ItemConst) {
+        let prev = self.in_const_ctx;
+        self.in_const_ctx = true;
+        visit::visit_item_const(self, i);
+        self.in_const_ctx = prev;
+    }
+ 
+    fn visit_item_static(&mut self, i: &'ast syn::ItemStatic) {
+        let prev = self.in_const_ctx;
+        self.in_const_ctx = true;
+        visit::visit_item_static(self, i);
+        self.in_const_ctx = prev;
     }
 
     fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
