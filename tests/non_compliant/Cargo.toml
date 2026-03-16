@@ -1,0 +1,9 @@
+[package]
+name = "non-compliant-test"
+version = "0.1.0"
+edition = "2021" # META001 error
+
+# No description (META002 error)
+# No license (META003 error)
+
+[dependencies]
