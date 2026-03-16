@@ -55,3 +55,7 @@ You can also manually add ignore globs in your `Cargo.toml`:
 [package.metadata.alloy-check]
 ignore = ["tests/**/*", "src/legacy.rs"]
 ```
+
+## LICENSE
+
+This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
