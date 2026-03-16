@@ -28,3 +28,9 @@ pub struct UndocumentedStruct {
 fn long_namespace() {
     let _map = std::collections::hash_map::DefaultHasher::new();
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {}
+}

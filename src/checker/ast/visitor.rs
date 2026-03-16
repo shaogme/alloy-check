@@ -195,7 +195,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         let mut seen_other = false;
         for item in &i.items {
             match item {
-                syn::Item::Mod(_) => {
+                syn::Item::Mod(m) if !has_test_attr(&m.attrs) => {
                     if seen_use || seen_other {
                         let s = item.span().start();
                         self.report.add(
