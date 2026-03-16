@@ -86,12 +86,20 @@ pub(crate) fn is_reserved_prefix(path: &str) -> bool {
 
 pub(crate) fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
-        a.path().is_ident("test") || {
-            a.to_token_stream()
-                .to_string()
-                .replace(' ', "")
-                .contains("cfg(test)")
+        if a.path().is_ident("test") {
+            return true;
         }
+        if a.path().is_ident("cfg") {
+            let mut is_test = false;
+            let _ = a.parse_nested_meta(|meta| {
+                if meta.path.is_ident("test") {
+                    is_test = true;
+                }
+                Ok(())
+            });
+            return is_test;
+        }
+        false
     })
 }
 

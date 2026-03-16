@@ -383,14 +383,14 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         visit::visit_item_fn(self, i);
         self.in_test_ctx = prev;
     }
- 
+
     fn visit_item_const(&mut self, i: &'ast syn::ItemConst) {
         let prev = self.in_const_ctx;
         self.in_const_ctx = true;
         visit::visit_item_const(self, i);
         self.in_const_ctx = prev;
     }
- 
+
     fn visit_item_static(&mut self, i: &'ast syn::ItemStatic) {
         let prev = self.in_const_ctx;
         self.in_const_ctx = true;

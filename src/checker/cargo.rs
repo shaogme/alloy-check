@@ -92,14 +92,14 @@ fn process_json_line(line: &str, ctx: &Ctx, report: &mut Report, prefix: &str) -
     let lvl = msg["level"].as_str().unwrap_or("");
 
     if lvl == "warning" || lvl == "error" {
-        process_compiler_message(msg, ctx, report, prefix);
+        process_compiler_message(msg, ctx, report, prefix, lvl);
     }
 
     Ok(())
 }
 
 /// 处理编译器消息。
-fn process_compiler_message(msg: &Value, ctx: &Ctx, report: &mut Report, prefix: &str) {
+fn process_compiler_message(msg: &Value, ctx: &Ctx, report: &mut Report, prefix: &str, lvl: &str) {
     let text = msg["message"].as_str().unwrap_or("Unknown error");
     let code = msg["code"]["code"].as_str().unwrap_or("GENERIC");
 
@@ -112,7 +112,7 @@ fn process_compiler_message(msg: &Value, ctx: &Ctx, report: &mut Report, prefix:
             continue;
         }
 
-        add_diagnostic_from_span(span, ctx, report, prefix, code, text);
+        add_diagnostic_from_span(span, ctx, report, prefix, code, text, lvl);
     }
 }
 
@@ -124,6 +124,7 @@ fn add_diagnostic_from_span(
     prefix: &str,
     code: &str,
     text: &str,
+    lvl: &str,
 ) {
     let file_name = span["file_name"].as_str().unwrap_or("");
     let line = span["line_start"].as_u64().unwrap_or(0) as usize;
@@ -136,7 +137,11 @@ fn add_diagnostic_from_span(
     }
 
     let code_str = format!("{}-{}", prefix, code);
-    let mut diag = Diag::error(abs_path, line, col, &code_str, text);
+    let mut diag = if lvl == "warning" {
+        Diag::warning(abs_path, line, col, &code_str, text)
+    } else {
+        Diag::error(abs_path, line, col, &code_str, text)
+    };
 
     if let Some(suggest) = span["suggested_replacement"].as_str() {
         diag = diag.with_suggestion(&format!("Try replacing with: `{}`", suggest));

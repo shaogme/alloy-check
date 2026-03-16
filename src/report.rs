@@ -1,8 +1,8 @@
 use colored::*;
 use std::path::PathBuf;
 
-use serde::Serialize;
 use Severity::{Error, Warning};
+use serde::Serialize;
 
 /// 表示诊断信息的严重程度。
 #[derive(Debug, Clone, Serialize)]
@@ -145,11 +145,12 @@ impl Report {
 
     /// 将由诊断信息序列化为 RON 格式并输出
     pub fn write_ron(&self, mut writer: impl std::io::Write) -> std::io::Result<()> {
-        let options = ron::ser::PrettyConfig::new()
+        use ron::ser::{PrettyConfig, to_string_pretty};
+        let options = PrettyConfig::new()
             .depth_limit(2)
             .separate_tuple_members(true)
             .enumerate_arrays(true);
-        match ron::ser::to_string_pretty(self, options) {
+        match to_string_pretty(self, options) {
             Ok(s) => writeln!(writer, "{}", s),
             Err(e) => writeln!(writer, "Failed to serialize report to RON: {}", e),
         }
