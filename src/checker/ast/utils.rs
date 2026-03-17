@@ -86,10 +86,17 @@ pub(crate) fn is_reserved_prefix(path: &str) -> bool {
 
 pub(crate) fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
-        if a.path().is_ident("test") {
+        let path = a.path();
+        if path.is_ident("test") || path.is_ident("rstest") || path.is_ident("test_case") {
             return true;
         }
-        if a.path().is_ident("cfg") {
+        // Handle #[tokio::test], #[async_std::test], #[test_log::test], etc.
+        if let Some(last) = path.segments.last() {
+            if last.ident == "test" || last.ident == "test_case" {
+                return true;
+            }
+        }
+        if path.is_ident("cfg") {
             let mut is_test = false;
             let _ = a.parse_nested_meta(|meta| {
                 if meta.path.is_ident("test") {
