@@ -254,14 +254,24 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
 
     fn visit_path(&mut self, i: &'ast syn::Path) {
         if i.leading_colon.is_none() && i.segments.len() > 1 {
-            let mut prefix_parts = Vec::new();
-            for (idx, seg) in i.segments.iter().enumerate() {
-                if idx == i.segments.len() - 1 {
+            let mut segments: Vec<_> = i.segments.iter().collect();
+            segments.pop(); // 始终移除最后一个段（如函数名、项名）
+
+            // 移除末尾的 PascalCase 段（通常是结构体、枚举或 Trait 名）
+            while let Some(last) = segments.last() {
+                let s = last.ident.to_string();
+                if s.chars().next().map_or(false, |c| c.is_uppercase()) {
+                    segments.pop();
+                } else {
                     break;
                 }
-                prefix_parts.push(seg.ident.to_string());
             }
-            let prefix_path = prefix_parts.join("::");
+
+            let prefix_path = segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
 
             if !prefix_path.is_empty() && !is_allowed_path_prefix(&prefix_path) {
                 let limit = 15;
