@@ -9,6 +9,10 @@ pub struct WorkspaceContext {
     pub metadata: Metadata,
     /// 工作空间的根目录路径。
     pub root: PathBuf,
+    /// 激活所有特性。
+    pub all_features: bool,
+    /// 激活的特性列表。
+    pub features: Vec<String>,
 }
 
 impl WorkspaceContext {
@@ -20,8 +24,15 @@ impl WorkspaceContext {
             .with_context(|| format!("Failed to load cargo metadata from {:?}", path))?;
 
         let root = metadata.workspace_root.as_std_path().to_path_buf();
+        let all_features = false;
+        let features = Vec::new();
 
-        Ok(Self { metadata, root })
+        Ok(Self {
+            metadata,
+            root,
+            all_features,
+            features,
+        })
     }
 
     /// 返回工作空间中的所有包。

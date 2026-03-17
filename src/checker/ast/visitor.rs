@@ -193,7 +193,10 @@ impl<'a> AstVisitor<'a> {
     fn check_tuple_size(&mut self, len: usize, span: proc_macro2::Span, kind: &str) {
         if len >= 4 {
             let s = span.start();
-            let msg = format!("{} tuple has too many elements ({} segments, max 3).", kind, len);
+            let msg = format!(
+                "{} tuple has too many elements ({} segments, max 3).",
+                kind, len
+            );
             self.report.add(
                 Diag::error(
                     self.current_file.to_path_buf(),
@@ -293,7 +296,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             // 移除末尾的 PascalCase 段（通常是结构体、枚举或 Trait 名）
             while let Some(last) = segments.last() {
                 let s = last.ident.to_string();
-                if s.chars().next().map_or(false, |c| c.is_uppercase()) {
+                if s.chars().next().is_some_and(|c| c.is_uppercase()) {
                     segments.pop();
                 } else {
                     break;

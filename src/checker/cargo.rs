@@ -31,31 +31,45 @@ pub fn check_fmt(ctx: &Ctx, report: &mut Report) -> Result<()> {
 
 /// 运行 `cargo clippy` 并解析其 JSON 输出。
 pub fn check_clippy(ctx: &Ctx, report: &mut Report) -> Result<()> {
-    let args = vec![
-        "clippy",
-        "--all-targets",
-        "--all-features",
-        "--message-format=json",
-        "--",
-        "-D",
-        "warnings",
+    let mut args = vec![
+        "clippy".to_string(),
+        "--all-targets".to_string(),
+        "--message-format=json".to_string(),
     ];
+
+    if ctx.all_features {
+        args.push("--all-features".to_string());
+    }
+    if !ctx.features.is_empty() {
+        args.push("--features".to_string());
+        args.push(ctx.features.join(" "));
+    }
+
+    args.extend(["--".to_string(), "-D".to_string(), "warnings".to_string()]);
     run_cargo_json(ctx, report, args, "CLIPPY")
 }
 
 /// 运行 `cargo check` 并解析其 JSON 输出。
 pub fn check_cargo(ctx: &Ctx, report: &mut Report) -> Result<()> {
-    let args = vec![
-        "check",
-        "--all-targets",
-        "--all-features",
-        "--message-format=json",
+    let mut args = vec![
+        "check".to_string(),
+        "--all-targets".to_string(),
+        "--message-format=json".to_string(),
     ];
+
+    if ctx.all_features {
+        args.push("--all-features".to_string());
+    }
+    if !ctx.features.is_empty() {
+        args.push("--features".to_string());
+        args.push(ctx.features.join(" "));
+    }
+
     run_cargo_json(ctx, report, args, "CHECK")
 }
 
 /// 运行 cargo 命令并处理其 JSON 输出。
-fn run_cargo_json(ctx: &Ctx, report: &mut Report, args: Vec<&str>, prefix: &str) -> Result<()> {
+fn run_cargo_json(ctx: &Ctx, report: &mut Report, args: Vec<String>, prefix: &str) -> Result<()> {
     let mut child = Command::new("cargo")
         .args(&args)
         .current_dir(&ctx.root)

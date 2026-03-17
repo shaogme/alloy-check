@@ -39,6 +39,14 @@ struct Args {
     /// Optional path to write output file
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// Activate all available features
+    #[arg(long)]
+    all_features: bool,
+
+    /// Space-separated list of features to activate
+    #[arg(long, value_delimiter = ' ')]
+    features: Vec<String>,
 }
 
 fn main() -> Result<()> {
@@ -58,7 +66,9 @@ fn run(args: &Args) -> Result<()> {
     }
 
     // 加载工作空间上下文
-    let ctx = Ctx::load(&args.path)?;
+    let mut ctx = Ctx::load(&args.path)?;
+    ctx.all_features = args.all_features;
+    ctx.features = args.features.clone();
 
     if args.verbose {
         print_ctx_info(&ctx);
