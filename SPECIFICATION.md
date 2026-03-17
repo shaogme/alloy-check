@@ -74,29 +74,40 @@
   - 超过 650 行将触发 **Warning**。
   - 超过 800 行将触发 **Error**。
 
-## 4. 错误处理与安全性 (Error Handling & Safety)
+## 4. 类型与数据设计 (Type & Data Design)
 
-### 4.1 禁止非预期的 Panic
+### 4.1 限制元组元素数量
+元组（Tuple）的元素数量必须严格小于 4 个。
+- **违规场景**：使用包含 4 个或更多元素的元组。
+- **推荐方案**：使用具名结构体（Named Struct）代替过长的元组，以提高代码可读性和可维护性。
+- **反例**：
+  ```rust
+  let data: (i32, String, bool, f64) = (1, "name".into(), true, 3.14); // 错误：元素数量为 4
+  ```
+
+## 5. 错误处理与安全性 (Error Handling & Safety)
+
+### 5.1 禁止非预期的 Panic
 - 在非测试（Test）代码中，严禁直接使用 `panic!`、`unwrap()` 或 `expect()`。
 - **替代方案**：统一使用 `Result<T, E>` 或 `Option<T>` 进行错误传递，并使用 `?` 操作符处理。
 
-### 4.2 显式 Safe Code
+### 5.2 显式 Safe Code
 - 除非底层性能优化或外部 FFI 调用，否则严禁使用 `unsafe` 块。
 - 使用 `unsafe` 时，必须在其上方添加 `// SAFETY:` 注释说明安全性理由。
 
-## 5. 文档与元数据 (Documentation & Metadata)
+## 6. 文档与元数据 (Documentation & Metadata)
 
-### 5.1 公有接口文档
+### 6.1 公有接口文档
 - 所有声明为 `pub` 的 struct, enum, function, trait 必须包含 `///` 文档注释。
 - 文档应包含：功能描述、参数说明（如果非显而易见）以及可能的错误情况（Panics/Errors）。
 
-### 5.2 Workspace 元数据
+### 6.2 Workspace 元数据
 - 每个成员 Crate 的 `Cargo.toml` 必须包含 `description`、`license` (建议 MIT/Apache-2.0) 和 `edition = "2024"`。
 - edition 必须大于或等于 2024
 
 ---
 
-## 6. 工具行为 (Tooling Behavior)
+## 7. 工具行为 (Tooling Behavior)
 
 `alloy-check` 工具将按照以下逻辑运行：
 1. **输入**：Rust Workspace 根目录。
@@ -133,14 +144,14 @@
 
 ---
 
-## 7. 排除规则 (Exclusions)
+## 8. 排除规则 (Exclusions)
 
 在某些特殊情况下，可以排除特定的文件或目录：
 - 默认排除 `target/` 目录。
 - 自动化生成的代码（如 `prost` 生成的 protobuf 代码）应通过文件名后缀（如 `.rs` 结尾但包含 `generated`）或配置进行排除。
 - 在 `Cargo.toml` 中配置 `[package.metadata.alloy-check.ignore]` 列表。
 
-## 8. 诊断错误码 (Diagnostic Codes)
+## 9. 诊断错误码 (Diagnostic Codes)
 
 `alloy-check` 定义了以下唯一的错误码进行问题的诊断与汇报：
 
@@ -150,6 +161,7 @@
 - **FUNC001**: 函数体过长（具有 50行/75行/100行 三级严重度）。
 - **FUNC002**: 函数嵌套层级过深（嵌套大于 5 层）。
 - **FUNC003**: 存在简单逻辑的函数包装/别名。
+- **TYPE001**: 元组元素数量过多（不得超过 3 个）。
 - **SAFE001**: 在非测试代码中使用了 `unwrap()` 或 `expect()`。
 - **SAFE002**: 在非测试代码中调用了 `panic!`、`core::panic!` 等引发非预期恐慌的宏。
 - **SAFE003**: 代码中含 `unsafe` 块或声明，但未在其上方提供 `// SAFETY:` 注释。

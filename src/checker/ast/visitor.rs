@@ -189,10 +189,42 @@ impl<'a> AstVisitor<'a> {
         self.check_function_length(sig, block);
         self.check_function_nesting(sig, block);
     }
+
+    fn check_tuple_size(&mut self, len: usize, span: proc_macro2::Span, kind: &str) {
+        if len >= 4 {
+            let s = span.start();
+            let msg = format!("{} tuple has too many elements ({} segments, max 3).", kind, len);
+            self.report.add(
+                Diag::error(
+                    self.current_file.to_path_buf(),
+                    s.line,
+                    s.column,
+                    "TYPE001",
+                    &msg,
+                )
+                .with_suggestion("Use a named struct instead of a large tuple for better clarity."),
+            );
+        }
+    }
 }
 
 impl<'ast> Visit<'ast> for AstVisitor<'_> {
     fn visit_file(&mut self, i: &'ast syn::File) {
+        let prev_test_ctx = self.in_test_ctx;
+
+        // 1. 检查文件级属性，如 #![cfg(test)]
+        if has_test_attr(&i.attrs) {
+            self.in_test_ctx = true;
+        }
+
+        // 2. 检查文件路径，如果位于 tests/ 或 benches/ 目录下，视为测试环境
+        if let Some(path_str) = self.current_file.to_str() {
+            let normalized = path_str.replace('\\', "/");
+            if normalized.contains("/tests/") || normalized.contains("/benches/") {
+                self.in_test_ctx = true;
+            }
+        }
+
         let mut seen_use = false;
         let mut seen_other = false;
         for item in &i.items {
@@ -226,6 +258,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             }
         }
         visit::visit_file(self, i);
+        self.in_test_ctx = prev_test_ctx;
     }
 
     fn visit_block(&mut self, i: &'ast syn::Block) {
@@ -377,8 +410,10 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         if i.sig.unsafety.is_some() {
             self.check_safety_comment(i.span());
         }
-        self.check_function_alias(&i.sig, &i.block);
-        self.check_complexity(&i.sig, &i.block);
+        if !self.in_test_ctx {
+            self.check_function_alias(&i.sig, &i.block);
+            self.check_complexity(&i.sig, &i.block);
+        }
         if !self.in_test_ctx {
             check_id_length(self.report, self.current_file, &i.sig.ident, false);
         }
@@ -428,13 +463,13 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         if i.sig.unsafety.is_some() {
             self.check_safety_comment(i.span());
         }
-        if !self.in_trait_impl {
-            self.check_function_alias(&i.sig, &i.block);
-            if !self.in_test_ctx {
+        if !self.in_test_ctx {
+            if !self.in_trait_impl {
+                self.check_function_alias(&i.sig, &i.block);
                 check_id_length(self.report, self.current_file, &i.sig.ident, true);
             }
+            self.check_complexity(&i.sig, &i.block);
         }
-        self.check_complexity(&i.sig, &i.block);
         check_doc(
             self.report,
             self.current_file,
@@ -489,5 +524,20 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             _ => {}
         }
         visit::visit_item(self, i);
+    }
+
+    fn visit_type_tuple(&mut self, i: &'ast syn::TypeTuple) {
+        self.check_tuple_size(i.elems.len(), i.span(), "Type");
+        visit::visit_type_tuple(self, i);
+    }
+
+    fn visit_expr_tuple(&mut self, i: &'ast syn::ExprTuple) {
+        self.check_tuple_size(i.elems.len(), i.span(), "Expression");
+        visit::visit_expr_tuple(self, i);
+    }
+
+    fn visit_pat_tuple(&mut self, i: &'ast syn::PatTuple) {
+        self.check_tuple_size(i.elems.len(), i.span(), "Pattern");
+        visit::visit_pat_tuple(self, i);
     }
 }
