@@ -74,7 +74,8 @@ fn run(args: &Args) -> Result<()> {
         print_ctx_info(&ctx);
     }
 
-    run_all_checks(&ctx, &mut report, args.verbose)?;
+    let json_mode = args.format == Format::Ron;
+    run_all_checks(&ctx, &mut report, args.verbose, json_mode)?;
 
     let mut writer: Box<dyn std::io::Write> = if let Some(path) = &args.output {
         colored::control::set_override(false);
@@ -105,7 +106,12 @@ fn print_ctx_info(ctx: &Ctx) {
     println!("Workspace members: {:?}", names);
 }
 
-fn run_all_checks(ctx: &Ctx, report: &mut Report, verbose: bool) -> Result<()> {
+/// 运行所有检查步骤。
+///
+/// `json_mode` 控制 `cargo check` / `cargo clippy` 的运行模式：
+/// - `false`（Human 模式）：原始输出直接透传到终端，出错立即返回 `Err`，不执行后续步骤。
+/// - `true`（JSON 模式）：解析 JSON 输出并填充 `report`，后续步骤照常运行。
+fn run_all_checks(ctx: &Ctx, report: &mut Report, verbose: bool, json_mode: bool) -> Result<()> {
     // Cargo 检查
     if verbose {
         println!("Running cargo fmt check...");
@@ -115,12 +121,14 @@ fn run_all_checks(ctx: &Ctx, report: &mut Report, verbose: bool) -> Result<()> {
     if verbose {
         println!("Running cargo check...");
     }
-    cargo::check_cargo(ctx, report)?;
+    // Human 模式：出错直接返回，不继续后续步骤
+    cargo::check_cargo(ctx, report, json_mode)?;
 
     if verbose {
         println!("Running cargo clippy...");
     }
-    cargo::check_clippy(ctx, report)?;
+    // Human 模式：出错直接返回，不继续后续步骤
+    cargo::check_clippy(ctx, report, json_mode)?;
 
     // 元数据验证
     if verbose {

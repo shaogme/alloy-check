@@ -6,13 +6,33 @@
 
 ### 1.1 禁止任何 Warnings
 代码合并或交付前，必须通过以下检查且无任何警示信息：
-- 执行 `cargo check --all-targets --all-features` 无 warnings。
-- 执行 `cargo clippy --all-targets --all-features -- -D warnings` 无 warnings。
+- 执行 `cargo check --all-targets -- -D warnings` 无 warnings（可选追加 `--features <F>` 或 `--all-features`）。
+- 执行 `cargo clippy --all-targets -- -D warnings` 无 warnings（可选追加 feature 参数）。
 - *注：严禁使用 `#[allow(...)]` 规避通用规范，除非是在极端特殊情况下并附带充分理由的注释。*
 
 ### 1.2 检测代码格式化
 - 必须运行 `cargo fmt --all --check` 以检测代码是否符合格式化规范。
 - 严禁修改默认的 `rustfmt.toml` 配置，除非经过团队一致同意。
+
+### 1.3 禁止特定 `#[allow(...)]` 压制项
+
+以下 Clippy lint **严禁**通过 `#[allow(...)]` 进行压制，必须修改代码从根本上解决问题：
+
+| 禁止的 lint | 理由 | 推荐替代方案 |
+|---|---|---|
+| `clippy::too_many_arguments` | 参数过多（Clippy 默认阈值 7 个）表明函数职责不清 | 引入配置 struct（Builder 模式）或拆分函数 |
+
+- **反例**：
+  ```rust
+  // 错误：通过 allow 掩盖设计缺陷
+  #[allow(clippy::too_many_arguments)]
+  pub fn process(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) { ... }
+  ```
+- **正例**：
+  ```rust
+  pub struct ProcessConfig { pub a: i32, pub b: i32, /* ... */ }
+  pub fn process(cfg: ProcessConfig) { ... }
+  ```
 
 ## 2. 路径与导入规范 (Paths & Imports)
 
@@ -158,6 +178,15 @@
          Warning,
      }
      ```
+
+4. **两种运行模式**：
+
+   | 模式 | 触发条件 | `cargo check` / `cargo clippy` 行为 |
+   |---|---|---|
+   | **Human 模式**（默认） | 未指定 `--format ron` | 执行 `RUSTFLAGS="-D warnings" cargo check --all-targets` 和 `cargo clippy --all-targets -- -D warnings`，原始输出**完整透传**到终端；若命令失败则**立即以错误码退出**，不再执行后续步骤（元数据检查、AST 分析等）。<br>*注：`cargo check` 不支持 `-- <rustc-flag>` 语法，故通过 `RUSTFLAGS` 环境变量传递。* |
+   | **JSON 模式** | `--format ron` | 执行带 `--message-format=json` 的命令，解析 JSON 输出并写入 `report`，后续步骤照常运行。 |
+
+   - **features 参数**：`--features <FEATURE_LIST>` 和 `--all-features` 为可选参数，按需传入；两者互斥，`--all-features` 优先。
    - 如果违反任何规范且达到 **Error** 严重度，工具必须以非零状态码 (Exit Code != 0) 退出。
    - 如果仅存在 **Warning** 严重度的问题，工具应以零状态码 (Exit Code = 0) 退出。
    - 打印详细的错误列表，指明错误类型、所在文件、行号及修复建议。
@@ -192,6 +221,7 @@
 - **META001**: `Cargo.toml` 中 `edition` 未按要求配置。
 - **META002**: `Cargo.toml` 中缺少有意义的 `description`。
 - **META003**: `Cargo.toml` 中缺少有意义的 `license`。
+- **LINT001**: 在 `#[allow(...)]` 中出现了被明确禁止的 lint（如 `clippy::too_many_arguments`）。
 
 ---
 

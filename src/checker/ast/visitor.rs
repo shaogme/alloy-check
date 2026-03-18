@@ -449,6 +449,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         if !self.in_test_ctx {
             self.check_function_alias(&i.sig, &i.block);
             self.check_complexity(&i.sig, &i.block);
+            check_allow_attrs(self.report, self.current_file, &i.attrs, i.sig.ident.span());
         }
         if !self.in_test_ctx {
             check_id_length(self.report, self.current_file, &i.sig.ident, false);
@@ -518,6 +519,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
                 check_id_length(self.report, self.current_file, &i.sig.ident, true);
             }
             self.check_complexity(&i.sig, &i.block);
+            check_allow_attrs(self.report, self.current_file, &i.attrs, i.sig.ident.span());
         }
         check_doc(
             self.report,

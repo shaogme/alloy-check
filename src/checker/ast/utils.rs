@@ -1,5 +1,6 @@
 use crate::report::Diagnostic as Diag;
 use crate::report::Report;
+use proc_macro2::Span;
 use quote::ToTokens;
 use std::path::Path;
 use syn::visit::{self, Visit};
@@ -171,4 +172,50 @@ pub(crate) fn count_code_lines(source_text: &str, block: &syn::Block) -> usize {
         }
     }
     lines
+}
+
+/// 禁止列表：`#[allow(...)]` 中不得出现的 lint 名称。
+const BANNED_ALLOWS: &[&str] = &["clippy::too_many_arguments"];
+
+/// 检查属性列表中是否包含被禁止的 `#[allow(...)]` lint。
+///
+/// 对每个 `#[allow(a, b, ...)]` 属性，提取其中所有 lint 路径，
+/// 若命中 `BANNED_ALLOWS`，则上报 `LINT001` 错误。
+pub(crate) fn check_allow_attrs(
+    report: &mut Report,
+    file: &Path,
+    attrs: &[syn::Attribute],
+    site_span: Span,
+) {
+    for attr in attrs {
+        if !attr.path().is_ident("allow") {
+            continue;
+        }
+        // 解析 allow(...) 的括号内容，枚举所有 lint
+        let _ = attr.parse_nested_meta(|meta| {
+            let lint = meta
+                .path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+            if BANNED_ALLOWS.contains(&lint.as_str()) {
+                let s = site_span.start();
+                let msg = format!(
+                    "`#[allow({lint})]` is prohibited; \
+                     refactor the code to reduce argument count instead."
+                );
+                report.add(
+                    Diag::error(file.to_path_buf(), s.line, s.column, "LINT001", &msg)
+                        .with_suggestion(
+                            "Remove `#[allow(clippy::too_many_arguments)]` and \
+                         refactor the function to accept fewer parameters \
+                         (e.g., introduce a builder or a config struct).",
+                        ),
+                );
+            }
+            Ok(())
+        });
+    }
 }

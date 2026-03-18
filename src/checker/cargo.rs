@@ -29,46 +29,96 @@ pub fn check_fmt(ctx: &Ctx, report: &mut Report) -> Result<()> {
     Ok(())
 }
 
-/// 运行 `cargo clippy` 并解析其 JSON 输出。
-pub fn check_clippy(ctx: &Ctx, report: &mut Report) -> Result<()> {
-    let mut args = vec![
-        "clippy".to_string(),
-        "--all-targets".to_string(),
-        "--message-format=json".to_string(),
-    ];
+/// 运行 `cargo check`。
+///
+/// - **Human 模式**：执行 `RUSTFLAGS="-D warnings" cargo check --all-targets`，
+///   将 stderr 直接透传到终端。若命令失败则立即返回 `Err`，调用方应中止后续步骤。
+/// - **JSON 模式**：执行 `cargo check --all-targets --message-format=json`，
+///   解析 JSON 输出并将诊断写入 `report`。
+pub fn check_cargo(ctx: &Ctx, report: &mut Report, json_mode: bool) -> Result<()> {
+    let mut args = vec!["check".to_string(), "--all-targets".to_string()];
+    push_feature_args(ctx, &mut args);
 
-    if ctx.all_features {
-        args.push("--all-features".to_string());
+    if json_mode {
+        args.push("--message-format=json".to_string());
+        run_cargo_json(ctx, report, args, "CHECK")
+    } else {
+        // cargo check 不支持 `-- -D warnings`，需通过 RUSTFLAGS 传入
+        run_cargo_passthrough(ctx, args, Some("-D warnings"))
     }
-    if !ctx.features.is_empty() {
-        args.push("--features".to_string());
-        args.push(ctx.features.join(" "));
-    }
-
-    args.extend(["--".to_string(), "-D".to_string(), "warnings".to_string()]);
-    run_cargo_json(ctx, report, args, "CLIPPY")
 }
 
-/// 运行 `cargo check` 并解析其 JSON 输出。
-pub fn check_cargo(ctx: &Ctx, report: &mut Report) -> Result<()> {
-    let mut args = vec![
-        "check".to_string(),
-        "--all-targets".to_string(),
-        "--message-format=json".to_string(),
-    ];
+/// 运行 `cargo clippy`。
+///
+/// - **Human 模式**：执行 `cargo clippy --all-targets -- -D warnings`，
+///   将 stderr 直接透传到终端。若命令失败则立即返回 `Err`，调用方应中止后续步骤。
+/// - **JSON 模式**：执行 `cargo clippy --all-targets --message-format=json -- -D warnings`，
+///   解析 JSON 输出并将诊断写入 `report`。
+pub fn check_clippy(ctx: &Ctx, report: &mut Report, json_mode: bool) -> Result<()> {
+    let mut args = vec!["clippy".to_string(), "--all-targets".to_string()];
+    push_feature_args(ctx, &mut args);
 
-    if ctx.all_features {
-        args.push("--all-features".to_string());
+    if json_mode {
+        args.push("--message-format=json".to_string());
+        args.extend(["--".to_string(), "-D".to_string(), "warnings".to_string()]);
+        run_cargo_json(ctx, report, args, "CLIPPY")
+    } else {
+        args.extend(["--".to_string(), "-D".to_string(), "warnings".to_string()]);
+        run_cargo_passthrough(ctx, args, None)
     }
-    if !ctx.features.is_empty() {
-        args.push("--features".to_string());
-        args.push(ctx.features.join(" "));
-    }
-
-    run_cargo_json(ctx, report, args, "CHECK")
 }
 
-/// 运行 cargo 命令并处理其 JSON 输出。
+// ──────────────────────────────── 内部工具函数 ────────────────────────────────
+
+/// 将 features 参数追加到 args 列表中（如果有配置）。
+fn push_feature_args(ctx: &Ctx, args: &mut Vec<String>) {
+    if ctx.all_features {
+        args.push("--all-features".to_string());
+    } else if !ctx.features.is_empty() {
+        args.push("--features".to_string());
+        args.push(ctx.features.join(","));
+    }
+}
+
+/// Human 模式：直接运行 cargo 命令，stderr 透传，若失败返回 Err。
+///
+/// `extra_rustflags`：若指定，则追加到 `RUSTFLAGS` 环境变量（适用于不支持 `-- <flag>` 的子命令，如 `cargo check`）。
+fn run_cargo_passthrough(
+    ctx: &Ctx,
+    args: Vec<String>,
+    extra_rustflags: Option<&str>,
+) -> Result<()> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(&args)
+        .current_dir(&ctx.root)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    if let Some(flags) = extra_rustflags {
+        // 保留环境中已有的 RUSTFLAGS，追加新 flag
+        let existing = std::env::var("RUSTFLAGS").unwrap_or_default();
+        let merged = if existing.is_empty() {
+            flags.to_string()
+        } else {
+            format!("{existing} {flags}")
+        };
+        cmd.env("RUSTFLAGS", merged);
+    }
+
+    let status = cmd.status()?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "cargo {} failed with exit code {}",
+            args.first().map(String::as_str).unwrap_or("?"),
+            status.code().unwrap_or(-1)
+        ))
+    }
+}
+
+/// JSON 模式：运行 cargo 命令并解析其 JSON 输出流，填充 report。
 fn run_cargo_json(ctx: &Ctx, report: &mut Report, args: Vec<String>, prefix: &str) -> Result<()> {
     let mut child = Command::new("cargo")
         .args(&args)
