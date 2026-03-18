@@ -29,39 +29,62 @@ impl<'a> AstVisitor<'a> {
         }
     }
 
-    fn check_safety_comment(&mut self, span: proc_macro2::Span) {
+    fn check_safety_comment(&mut self, span: proc_macro2::Span, is_item: bool) {
         let line = span.start().line;
         if line <= 1 {
             return;
         }
         let lines: Vec<&str> = self.source_text.lines().collect();
         let mut found_safety = false;
+
+        let expected_prefix = if is_item { "///" } else { "//" };
+        let expected_keyword = if is_item { "# Safety" } else { "SAFETY:" };
+
         for j in (0..line - 1).rev() {
             let l = lines[j].trim();
             if l.is_empty() {
                 continue;
             }
-            if l.starts_with("//") {
-                if l.contains("SAFETY:") {
+
+            // For items, we require doc comment (///) and # Safety section
+            // For blocks, we require regular comment (//) and NOT doc comment (///)
+            if l.starts_with(expected_prefix) {
+                if !is_item && l.starts_with("///") {
+                    // Doc comment on unsafe block is not what we expect
+                } else if l.contains(expected_keyword) {
                     found_safety = true;
                     break;
                 }
-            } else {
+            }
+
+            if !l.starts_with("//") {
                 break;
             }
         }
 
         if !found_safety {
             let start = span.start();
+            let (msg, suggestion) = if is_item {
+                (
+                    "Missing `/// # Safety` doc comment section above unsafe item.",
+                    "Add `/// # Safety` section to document item safety (matching Clippy standard).",
+                )
+            } else {
+                (
+                    "Missing `// SAFETY:` comment above unsafe block.",
+                    "Add `// SAFETY: [reason]` to document why this block is safe.",
+                )
+            };
+
             self.report.add(
                 Diag::error(
                     self.current_file.to_path_buf(),
                     start.line,
                     start.column,
                     "SAFE003",
-                    "Missing `// SAFETY:` comment above unsafe block or item.",
+                    msg,
                 )
-                .with_suggestion("Add `// SAFETY: [reason]` to document why this is safe."),
+                .with_suggestion(suggestion),
             );
         }
     }
@@ -392,7 +415,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
     }
 
     fn visit_expr_unsafe(&mut self, i: &'ast syn::ExprUnsafe) {
-        self.check_safety_comment(i.span());
+        self.check_safety_comment(i.span(), false);
         visit::visit_expr_unsafe(self, i);
     }
 
@@ -411,7 +434,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             self.in_test_ctx = true;
         }
         if i.sig.unsafety.is_some() {
-            self.check_safety_comment(i.span());
+            self.check_safety_comment(i.span(), true);
         }
         if !self.in_test_ctx {
             self.check_function_alias(&i.sig, &i.block);
@@ -452,7 +475,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             self.in_trait_impl = true;
         }
         if i.unsafety.is_some() {
-            self.check_safety_comment(i.span());
+            self.check_safety_comment(i.span(), true);
         }
         visit::visit_item_impl(self, i);
         self.in_trait_impl = prev;
@@ -464,7 +487,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             self.in_test_ctx = true;
         }
         if i.sig.unsafety.is_some() {
-            self.check_safety_comment(i.span());
+            self.check_safety_comment(i.span(), true);
         }
         if !self.in_test_ctx {
             if !self.in_trait_impl {
@@ -505,7 +528,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             ),
             syn::Item::Trait(it) => {
                 if it.unsafety.is_some() {
-                    self.check_safety_comment(it.span());
+                    self.check_safety_comment(it.span(), true);
                 }
                 check_doc(
                     self.report,

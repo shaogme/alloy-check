@@ -92,9 +92,10 @@ pub(crate) fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
         }
         // Handle #[tokio::test], #[async_std::test], #[test_log::test], etc.
         if let Some(last) = path.segments.last()
-            && (last.ident == "test" || last.ident == "test_case") {
-                return true;
-            }
+            && (last.ident == "test" || last.ident == "test_case")
+        {
+            return true;
+        }
         if path.is_ident("cfg") {
             let mut is_test = false;
             let _ = a.parse_nested_meta(|meta| {
