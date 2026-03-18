@@ -29,7 +29,7 @@ impl<'a> AstVisitor<'a> {
         }
     }
 
-    fn check_block_safety_comment(&mut self, span: proc_macro2::Span) {
+    fn check_blk_safety(&mut self, span: proc_macro2::Span) {
         let line = span.start().line;
         if line <= 1 {
             return;
@@ -44,11 +44,9 @@ impl<'a> AstVisitor<'a> {
             }
 
             // For blocks, we require regular comment (//) and NOT doc comment (///)
-            if l.starts_with("//") && !l.starts_with("///") {
-                if l.contains("SAFETY:") {
-                    found_safety = true;
-                    break;
-                }
+            if l.starts_with("//") && !l.starts_with("///") && l.contains("SAFETY:") {
+                found_safety = true;
+                break;
             }
 
             if !l.starts_with("//") {
@@ -71,24 +69,19 @@ impl<'a> AstVisitor<'a> {
         }
     }
 
-    fn check_item_safety_comment(&mut self, attrs: &[syn::Attribute], span: proc_macro2::Span) {
-        let mut found_safety = false;
-        for attr in attrs {
-            if let syn::Meta::NameValue(nv) = &attr.meta {
-                if nv.path.is_ident("doc") {
-                    if let syn::Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Str(s),
-                        ..
-                    }) = &nv.value
-                    {
-                        if s.value().contains("# Safety") {
-                            found_safety = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+    fn check_item_safety(&mut self, attrs: &[syn::Attribute], span: proc_macro2::Span) {
+        let found_safety = attrs.iter().any(|attr| {
+            matches!(
+                &attr.meta,
+                syn::Meta::NameValue(nv)
+                    if nv.path.is_ident("doc")
+                    && matches!(
+                        &nv.value,
+                        syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. })
+                            if s.value().contains("# Safety")
+                    )
+            )
+        });
 
         if !found_safety {
             let start = span.start();
@@ -152,7 +145,7 @@ impl<'a> AstVisitor<'a> {
         }
     }
 
-    fn check_function_length(&mut self, sig: &syn::Signature, block: &syn::Block) {
+    fn check_fn_length(&mut self, sig: &syn::Signature, block: &syn::Block) {
         let i = &sig.ident;
         let lines = count_code_lines(self.source_text, block);
         let pos = i.span().start();
@@ -199,7 +192,7 @@ impl<'a> AstVisitor<'a> {
         }
     }
 
-    fn check_function_nesting(&mut self, sig: &syn::Signature, block: &syn::Block) {
+    fn check_fn_nesting(&mut self, sig: &syn::Signature, block: &syn::Block) {
         let i = &sig.ident;
         let mut v = NestingVisitor::default();
         v.visit_block(block);
@@ -225,8 +218,8 @@ impl<'a> AstVisitor<'a> {
     }
 
     fn check_complexity(&mut self, sig: &syn::Signature, block: &syn::Block) {
-        self.check_function_length(sig, block);
-        self.check_function_nesting(sig, block);
+        self.check_fn_length(sig, block);
+        self.check_fn_nesting(sig, block);
     }
 
     fn check_tuple_size(&mut self, len: usize, span: proc_macro2::Span, kind: &str) {
@@ -271,7 +264,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         let mut seen_other = false;
         for item in &i.items {
             match item {
-                syn::Item::Mod(m) if !has_test_attr(&m.attrs) => {
+                syn::Item::Mod(m) if m.content.is_none() && !has_test_attr(&m.attrs) => {
                     if seen_use || seen_other {
                         let s = item.span().start();
                         self.report.add(
@@ -286,6 +279,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
                         );
                     }
                 }
+                syn::Item::Mod(_) => {}
                 syn::Item::Use(_) => {
                     seen_use = true;
                     if seen_other {
@@ -431,7 +425,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
     }
 
     fn visit_expr_unsafe(&mut self, i: &'ast syn::ExprUnsafe) {
-        self.check_block_safety_comment(i.span());
+        self.check_blk_safety(i.span());
         visit::visit_expr_unsafe(self, i);
     }
 
@@ -450,7 +444,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             self.in_test_ctx = true;
         }
         if i.sig.unsafety.is_some() {
-            self.check_item_safety_comment(&i.attrs, i.span());
+            self.check_item_safety(&i.attrs, i.span());
         }
         if !self.in_test_ctx {
             self.check_function_alias(&i.sig, &i.block);
@@ -491,7 +485,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             self.in_trait_impl = true;
         }
         if i.unsafety.is_some() {
-            self.check_block_safety_comment(i.span());
+            self.check_blk_safety(i.span());
         }
         visit::visit_item_impl(self, i);
         self.in_trait_impl = prev;
@@ -503,7 +497,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             self.in_test_ctx = true;
         }
         if i.sig.unsafety.is_some() {
-            self.check_item_safety_comment(&i.attrs, i.span());
+            self.check_item_safety(&i.attrs, i.span());
         }
         if !self.in_test_ctx {
             if !self.in_trait_impl {
@@ -544,7 +538,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             ),
             syn::Item::Trait(it) => {
                 if it.unsafety.is_some() {
-                    self.check_item_safety_comment(&it.attrs, it.span());
+                    self.check_item_safety(&it.attrs, it.span());
                 }
                 check_doc(
                     self.report,
@@ -581,5 +575,58 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
     fn visit_pat_tuple(&mut self, i: &'ast syn::PatTuple) {
         self.check_tuple_size(i.elems.len(), i.span(), "Pattern");
         visit::visit_pat_tuple(self, i);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AstVisitor;
+    use crate::report::Report;
+    use std::path::Path;
+    use syn::visit::Visit;
+
+    #[test]
+    fn cfg_test_module_before_use_should_not_trigger_path002() {
+        let src = r#"
+pub mod common;
+
+#[cfg(test)]
+pub mod tests;
+
+use std::collections::HashMap;
+pub fn demo() -> HashMap<String, String> {
+    HashMap::new()
+}
+"#;
+
+        let file = syn::parse_file(src).expect("source should parse");
+        let mut report = Report::new();
+        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        visitor.visit_file(&file);
+
+        let has_path002 = report.diagnostics.iter().any(|d| d.code == "PATH002");
+        assert!(!has_path002, "unexpected PATH002 diagnostics: {:?}", report);
+    }
+
+    #[test]
+    fn inline_module_before_use_should_not_trigger_path002() {
+        let src = r#"
+pub mod common {
+    pub fn x() {}
+}
+
+use std::collections::HashMap;
+pub fn demo() -> HashMap<String, String> {
+    HashMap::new()
+}
+"#;
+
+        let file = syn::parse_file(src).expect("source should parse");
+        let mut report = Report::new();
+        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        visitor.visit_file(&file);
+
+        let has_path002 = report.diagnostics.iter().any(|d| d.code == "PATH002");
+        assert!(!has_path002, "unexpected PATH002 diagnostics: {:?}", report);
     }
 }
