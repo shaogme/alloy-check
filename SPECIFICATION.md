@@ -74,6 +74,24 @@
   - 超过 650 行将触发 **Warning**。
   - 超过 800 行将触发 **Error**。
 
+### 3.5 禁止非 Trait impl 的空 `impl` 块
+- 在非 `impl Trait for Type` 形式的普通 `impl` 块中，禁止出现空块（body 内无任何 item）。
+- **理由**：空的 `impl Struct {}` 没有任何语义价值，通常是遗留代码或误操作，应予以移除。
+- **允许例外**：`impl Trait for Type {}` 形式的空实现是有意义的（如标记 Trait），允许保留。
+- **反例**：
+  ```rust
+  struct Foo;
+  impl Foo {} // 错误：空的非 Trait impl 块
+  ```
+- **正例**：
+  ```rust
+  struct Foo;
+  trait Marker {}
+  impl Marker for Foo {} // 正确：标记 Trait 的空实现
+
+  impl Foo { fn bar(&self) {} } // 正确：非空 impl 块
+  ```
+
 ## 4. 类型与数据设计 (Type & Data Design)
 
 ### 4.1 限制元组元素数量
@@ -163,6 +181,7 @@
 - **FUNC001**: 函数体过长（具有 50行/75行/100行 三级严重度）。
 - **FUNC002**: 函数嵌套层级过深（嵌套大于 5 层）。
 - **FUNC003**: 存在简单逻辑的函数包装/别名。
+- **IMPL001**: 存在非 `impl Trait for Type` 形式的空 `impl` 块。
 - **TYPE001**: 元组元素数量过多（不得超过 3 个）。
 - **SAFE001**: 在非测试代码中使用了 `unwrap()` 或 `expect()`。
 - **SAFE002**: 在非测试代码中调用了 `panic!`、`core::panic!` 等引发非预期恐慌的宏。

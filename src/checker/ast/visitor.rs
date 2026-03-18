@@ -483,6 +483,19 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         let prev = self.in_trait_impl;
         if i.trait_.is_some() {
             self.in_trait_impl = true;
+        } else if i.items.is_empty() {
+            // 非 trait impl 的空块是无意义的，予以禁止
+            let s = i.span().start();
+            self.report.add(
+                Diag::error(
+                    self.current_file.to_path_buf(),
+                    s.line,
+                    s.column,
+                    "IMPL001",
+                    "Empty `impl` block is not allowed (only `impl Trait for Type` may be empty).",
+                )
+                .with_suggestion("Remove the empty `impl` block or add meaningful items."),
+            );
         }
         if i.unsafety.is_some() {
             self.check_blk_safety(i.span());
@@ -628,5 +641,53 @@ pub fn demo() -> HashMap<String, String> {
 
         let has_path002 = report.diagnostics.iter().any(|d| d.code == "PATH002");
         assert!(!has_path002, "unexpected PATH002 diagnostics: {:?}", report);
+    }
+
+    #[test]
+    fn empty_impl_block_should_trigger_impl001() {
+        let src = r#"
+struct Foo;
+impl Foo {}
+"#;
+        let file = syn::parse_file(src).expect("source should parse");
+        let mut report = Report::new();
+        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        visitor.visit_file(&file);
+
+        let has_impl001 = report.diagnostics.iter().any(|d| d.code == "IMPL001");
+        assert!(has_impl001, "expected IMPL001 but got: {:?}", report);
+    }
+
+    #[test]
+    fn empty_trait_impl_should_not_trigger_impl001() {
+        let src = r#"
+struct Foo;
+trait Bar {}
+impl Bar for Foo {}
+"#;
+        let file = syn::parse_file(src).expect("source should parse");
+        let mut report = Report::new();
+        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        visitor.visit_file(&file);
+
+        let has_impl001 = report.diagnostics.iter().any(|d| d.code == "IMPL001");
+        assert!(!has_impl001, "unexpected IMPL001 diagnostics: {:?}", report);
+    }
+
+    #[test]
+    fn non_empty_impl_block_should_not_trigger_impl001() {
+        let src = r#"
+struct Foo;
+impl Foo {
+    pub fn bar(&self) {}
+}
+"#;
+        let file = syn::parse_file(src).expect("source should parse");
+        let mut report = Report::new();
+        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        visitor.visit_file(&file);
+
+        let has_impl001 = report.diagnostics.iter().any(|d| d.code == "IMPL001");
+        assert!(!has_impl001, "unexpected IMPL001 diagnostics: {:?}", report);
     }
 }
