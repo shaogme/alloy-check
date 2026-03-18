@@ -94,8 +94,8 @@
 ### 5.2 显式 Safe Code
 - 除非底层性能优化或外部 FFI 调用，否则严禁使用 `unsafe` 块。
 - 使用 `unsafe` 时，必须在其上方提供安全性理由：
-  - **Unsafe Item (如函数、Trait、Impl)**：必须通过 `/// # Safety` 章节进行文档化（遵循 Clippy 标准）。
-  - **Unsafe Block (函数内部代码块)**：必须在上方添加 `// SAFETY:` 注释说明。
+  - **API 级 Unsafe (如 `unsafe fn` 定义、`unsafe trait` 定义)**：必须通过 `/// # Safety` 章节进行文档化（符合 Clippy 标准）。
+  - **实现级 Unsafe (如 `unsafe impl` 声明、函数内 `unsafe` 块)**：必须在上方添加 `// SAFETY:` 注释说明。
 
 ## 6. 文档与元数据 (Documentation & Metadata)
 
@@ -166,7 +166,7 @@
 - **TYPE001**: 元组元素数量过多（不得超过 3 个）。
 - **SAFE001**: 在非测试代码中使用了 `unwrap()` 或 `expect()`。
 - **SAFE002**: 在非测试代码中调用了 `panic!`、`core::panic!` 等引发非预期恐慌的宏。
-- **SAFE003**: 代码中含 `unsafe` 块或声明，但未在其上方提供充足的安全性说明。Unsafe Item 需 `/// # Safety` 文档章节，Unsafe Block 需 `// SAFETY:` 注释。
+- **SAFE003**: 代码中含 `unsafe` 块或声明，但未提供充足说明。API 定义需 `/// # Safety` 文档章节，实现/逻辑块需 `// SAFETY:` 注释。
 - **DOC001**: 声明为 `pub` 的接口缺少 Rustdoc (`///` 或 `#[doc]`) 或潜在的文档生成宏。
 - **ID001**: 标识符（如函数名、变量名）长度过长。
 - **FILE001**: 单个源文件总行数超过 800 行。

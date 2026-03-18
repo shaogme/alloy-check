@@ -29,7 +29,7 @@ impl<'a> AstVisitor<'a> {
         }
     }
 
-    fn check_safety_comment(&mut self, span: proc_macro2::Span, is_item: bool) {
+    fn check_block_safety_comment(&mut self, span: proc_macro2::Span) {
         let line = span.start().line;
         if line <= 1 {
             return;
@@ -37,21 +37,15 @@ impl<'a> AstVisitor<'a> {
         let lines: Vec<&str> = self.source_text.lines().collect();
         let mut found_safety = false;
 
-        let expected_prefix = if is_item { "///" } else { "//" };
-        let expected_keyword = if is_item { "# Safety" } else { "SAFETY:" };
-
         for j in (0..line - 1).rev() {
             let l = lines[j].trim();
             if l.is_empty() {
                 continue;
             }
 
-            // For items, we require doc comment (///) and # Safety section
             // For blocks, we require regular comment (//) and NOT doc comment (///)
-            if l.starts_with(expected_prefix) {
-                if !is_item && l.starts_with("///") {
-                    // Doc comment on unsafe block is not what we expect
-                } else if l.contains(expected_keyword) {
+            if l.starts_with("//") && !l.starts_with("///") {
+                if l.contains("SAFETY:") {
                     found_safety = true;
                     break;
                 }
@@ -64,27 +58,49 @@ impl<'a> AstVisitor<'a> {
 
         if !found_safety {
             let start = span.start();
-            let (msg, suggestion) = if is_item {
-                (
-                    "Missing `/// # Safety` doc comment section above unsafe item.",
-                    "Add `/// # Safety` section to document item safety (matching Clippy standard).",
-                )
-            } else {
-                (
-                    "Missing `// SAFETY:` comment above unsafe block.",
-                    "Add `// SAFETY: [reason]` to document why this block is safe.",
-                )
-            };
-
             self.report.add(
                 Diag::error(
                     self.current_file.to_path_buf(),
                     start.line,
                     start.column,
                     "SAFE003",
-                    msg,
+                    "Missing `// SAFETY:` comment above unsafe item or block.",
                 )
-                .with_suggestion(suggestion),
+                .with_suggestion("Add `// SAFETY: [reason]` to document why this implementation or block is safe."),
+            );
+        }
+    }
+
+    fn check_item_safety_comment(&mut self, attrs: &[syn::Attribute], span: proc_macro2::Span) {
+        let mut found_safety = false;
+        for attr in attrs {
+            if let syn::Meta::NameValue(nv) = &attr.meta {
+                if nv.path.is_ident("doc") {
+                    if let syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(s),
+                        ..
+                    }) = &nv.value
+                    {
+                        if s.value().contains("# Safety") {
+                            found_safety = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !found_safety {
+            let start = span.start();
+            self.report.add(
+                Diag::error(
+                    self.current_file.to_path_buf(),
+                    start.line,
+                    start.column,
+                    "SAFE003",
+                    "Missing `/// # Safety` doc comment section above unsafe item.",
+                )
+                .with_suggestion("Add `/// # Safety` section to document item safety (matching Clippy standard)."),
             );
         }
     }
@@ -415,7 +431,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
     }
 
     fn visit_expr_unsafe(&mut self, i: &'ast syn::ExprUnsafe) {
-        self.check_safety_comment(i.span(), false);
+        self.check_block_safety_comment(i.span());
         visit::visit_expr_unsafe(self, i);
     }
 
@@ -434,7 +450,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             self.in_test_ctx = true;
         }
         if i.sig.unsafety.is_some() {
-            self.check_safety_comment(i.span(), true);
+            self.check_item_safety_comment(&i.attrs, i.span());
         }
         if !self.in_test_ctx {
             self.check_function_alias(&i.sig, &i.block);
@@ -475,7 +491,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             self.in_trait_impl = true;
         }
         if i.unsafety.is_some() {
-            self.check_safety_comment(i.span(), true);
+            self.check_block_safety_comment(i.span());
         }
         visit::visit_item_impl(self, i);
         self.in_trait_impl = prev;
@@ -487,7 +503,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             self.in_test_ctx = true;
         }
         if i.sig.unsafety.is_some() {
-            self.check_safety_comment(i.span(), true);
+            self.check_item_safety_comment(&i.attrs, i.span());
         }
         if !self.in_test_ctx {
             if !self.in_trait_impl {
@@ -528,7 +544,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             ),
             syn::Item::Trait(it) => {
                 if it.unsafety.is_some() {
-                    self.check_safety_comment(it.span(), true);
+                    self.check_item_safety_comment(&it.attrs, it.span());
                 }
                 check_doc(
                     self.report,
