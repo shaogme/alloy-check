@@ -11,6 +11,8 @@ pub(crate) struct AstVisitor<'a> {
     pub report: &'a mut Report,
     pub current_file: &'a Path,
     pub source_text: &'a str,
+    pub package_name: String,
+    pub index: &'a super::index::SymbolIndex,
     pub in_test_ctx: bool,
     pub in_trait_impl: bool,
     pub in_const_ctx: bool,
@@ -19,11 +21,19 @@ pub(crate) struct AstVisitor<'a> {
 
 impl<'a> AstVisitor<'a> {
     /// Creates a new `AstVisitor`.
-    pub fn new(report: &'a mut Report, current_file: &'a Path, source_text: &'a str) -> Self {
+    pub fn new(
+        report: &'a mut Report,
+        current_file: &'a Path,
+        source_text: &'a str,
+        package_name: String,
+        index: &'a super::index::SymbolIndex,
+    ) -> Self {
         Self {
             report,
             current_file,
             source_text,
+            package_name,
+            index,
             in_test_ctx: false,
             in_trait_impl: false,
             in_const_ctx: false,
@@ -36,7 +46,7 @@ impl<'a> AstVisitor<'a> {
         let outer_line = outer_span.map(|s| s.start().line).unwrap_or(line);
 
         if outer_line <= 1 {
-            self.report_missing_safety(span);
+            self.report_no_safety_err(span);
             return;
         }
 
@@ -82,11 +92,11 @@ impl<'a> AstVisitor<'a> {
         }
 
         if !found_safety {
-            self.report_missing_safety(span);
+            self.report_no_safety_err(span);
         }
     }
 
-    fn report_missing_safety(&mut self, span: proc_macro2::Span) {
+    fn report_no_safety_err(&mut self, span: proc_macro2::Span) {
         let start = span.start();
         self.report.add(
             Diag::error(
@@ -132,39 +142,33 @@ impl<'a> AstVisitor<'a> {
     }
 
     fn check_function_alias(&mut self, sig: &syn::Signature, block: &syn::Block) {
-        let Some(call) = extract_single_call(block) else {
+        let Some(call_var) = extract_single_call(block) else {
             return;
         };
 
-        let mut param_idents = Vec::new();
-        for param in &sig.inputs {
-            if let syn::FnArg::Typed(pat_type) = param {
-                if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
-                    param_idents.push(pat_ident.ident.to_string());
-                } else {
-                    return;
-                }
-            } else if let syn::FnArg::Receiver(_) = param {
-                param_idents.push("self".to_string());
-            }
-        }
+        let Some(param_idents) = self.collect_params(sig) else {
+            return;
+        };
 
         let mut arg_idents = Vec::new();
-        for arg in &call.args {
-            if let syn::Expr::Path(expr_path) = arg {
-                if let Some(ident) = expr_path.path.get_ident() {
-                    arg_idents.push(ident.to_string());
-                } else {
-                    return;
-                }
-            } else {
-                return;
+        let (target_ident, is_method_call) = match call_var {
+            CallVariant::Call(call) => (self.collect_call_args(call, &mut arg_idents), false),
+            CallVariant::MethodCall(method) => {
+                (self.collect_method_args(method, &mut arg_idents), true)
             }
-        }
+        };
 
-        if param_idents == arg_idents {
+        if !target_ident.is_empty()
+            && param_idents == arg_idents
+            && self
+                .index
+                .is_internal_logic(&self.package_name, &target_ident, is_method_call)
+        {
             let s = sig.ident.span().start();
-            let msg = format!("Function `{}` is a simple alias wrapper.", sig.ident);
+            let msg = format!(
+                "Function `{}` is a simple alias wrapper for internal logic.",
+                sig.ident
+            );
             self.report.add(
                 Diag::error(
                     self.current_file.to_path_buf(),
@@ -176,6 +180,76 @@ impl<'a> AstVisitor<'a> {
                 .with_suggestion("Remove the alias and use the inner function directly."),
             );
         }
+    }
+
+    fn collect_params(&self, sig: &syn::Signature) -> Option<Vec<String>> {
+        let mut param_idents = Vec::new();
+        for param in &sig.inputs {
+            match param {
+                syn::FnArg::Typed(pat_type) => {
+                    if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                        param_idents.push(pat_ident.ident.to_string());
+                    } else {
+                        return None;
+                    }
+                }
+                syn::FnArg::Receiver(_) => {
+                    param_idents.push("self".to_string());
+                }
+            }
+        }
+        Some(param_idents)
+    }
+
+    fn collect_call_args(&self, call: &syn::ExprCall, arg_idents: &mut Vec<String>) -> String {
+        for arg in &call.args {
+            if let syn::Expr::Path(expr_path) = arg {
+                if let Some(ident) = expr_path.path.get_ident() {
+                    arg_idents.push(ident.to_string());
+                } else {
+                    return String::new();
+                }
+            } else {
+                return String::new();
+            }
+        }
+        if let syn::Expr::Path(p) = &*call.func {
+            match p.path.get_ident() {
+                Some(ident) => ident.to_string(),
+                None => String::new(),
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    fn collect_method_args(
+        &self,
+        method: &syn::ExprMethodCall,
+        arg_idents: &mut Vec<String>,
+    ) -> String {
+        if let syn::Expr::Path(expr_path) = &*method.receiver {
+            if let Some(ident) = expr_path.path.get_ident() {
+                arg_idents.push(ident.to_string());
+            } else {
+                return String::new();
+            }
+        } else {
+            return String::new();
+        }
+
+        for arg in &method.args {
+            if let syn::Expr::Path(expr_path) = arg {
+                if let Some(ident) = expr_path.path.get_ident() {
+                    arg_idents.push(ident.to_string());
+                } else {
+                    return String::new();
+                }
+            } else {
+                return String::new();
+            }
+        }
+        method.method.to_string()
     }
 
     fn check_fn_length(&mut self, sig: &syn::Signature, block: &syn::Block) {
@@ -673,6 +747,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
 #[cfg(test)]
 mod tests {
     use super::AstVisitor;
+    use crate::checker::ast::index::SymbolIndex;
     use crate::report::Report;
     use std::path::Path;
     use syn::visit::Visit;
@@ -693,7 +768,14 @@ pub fn demo() -> HashMap<String, String> {
 
         let file = syn::parse_file(src).expect("source should parse");
         let mut report = Report::new();
-        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        let index = SymbolIndex::default();
+        let mut visitor = AstVisitor::new(
+            &mut report,
+            Path::new("src/lib.rs"),
+            src,
+            "test".to_string(),
+            &index,
+        );
         visitor.visit_file(&file);
 
         let has_path002 = report.diagnostics.iter().any(|d| d.code == "PATH002");
@@ -715,7 +797,14 @@ pub fn demo() -> HashMap<String, String> {
 
         let file = syn::parse_file(src).expect("source should parse");
         let mut report = Report::new();
-        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        let index = SymbolIndex::default();
+        let mut visitor = AstVisitor::new(
+            &mut report,
+            Path::new("src/lib.rs"),
+            src,
+            "test".to_string(),
+            &index,
+        );
         visitor.visit_file(&file);
 
         let has_path002 = report.diagnostics.iter().any(|d| d.code == "PATH002");
@@ -730,7 +819,14 @@ impl Foo {}
 "#;
         let file = syn::parse_file(src).expect("source should parse");
         let mut report = Report::new();
-        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        let index = SymbolIndex::default();
+        let mut visitor = AstVisitor::new(
+            &mut report,
+            Path::new("src/lib.rs"),
+            src,
+            "test".to_string(),
+            &index,
+        );
         visitor.visit_file(&file);
 
         let has_impl001 = report.diagnostics.iter().any(|d| d.code == "IMPL001");
@@ -746,7 +842,14 @@ impl Bar for Foo {}
 "#;
         let file = syn::parse_file(src).expect("source should parse");
         let mut report = Report::new();
-        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        let index = SymbolIndex::default();
+        let mut visitor = AstVisitor::new(
+            &mut report,
+            Path::new("src/lib.rs"),
+            src,
+            "test".to_string(),
+            &index,
+        );
         visitor.visit_file(&file);
 
         let has_impl001 = report.diagnostics.iter().any(|d| d.code == "IMPL001");
@@ -763,10 +866,51 @@ impl Foo {
 "#;
         let file = syn::parse_file(src).expect("source should parse");
         let mut report = Report::new();
-        let mut visitor = AstVisitor::new(&mut report, Path::new("src/lib.rs"), src);
+        let index = SymbolIndex::default();
+        let mut visitor = AstVisitor::new(
+            &mut report,
+            Path::new("src/lib.rs"),
+            src,
+            "test".to_string(),
+            &index,
+        );
         visitor.visit_file(&file);
 
         let has_impl001 = report.diagnostics.iter().any(|d| d.code == "IMPL001");
         assert!(!has_impl001, "unexpected IMPL001 diagnostics: {:?}", report);
+    }
+
+    #[test]
+    fn simple_logic_alias_should_trigger_func003() {
+        use std::collections::{HashMap, HashSet};
+
+        let src = r#"
+            pub fn wrap(p: &MyPool, x: i32) {
+                p.update(x)
+            }
+        "#;
+        let file = syn::parse_file(src).expect("source should parse");
+        let mut report = Report::new();
+        let mut inherent = HashMap::new();
+        let mut methods = HashSet::new();
+        methods.insert("update".to_string());
+        inherent.insert("test-pkg".to_string(), methods);
+        let index = SymbolIndex {
+            free_fns: HashMap::new(),
+            inherent_methods: inherent,
+            trait_methods: HashSet::new(),
+        };
+
+        let mut visitor = AstVisitor::new(
+            &mut report,
+            Path::new("src/lib.rs"),
+            src,
+            "test-pkg".to_string(),
+            &index,
+        );
+        visitor.visit_file(&file);
+
+        let has_func003 = report.diagnostics.iter().any(|d| d.code == "FUNC003");
+        assert!(has_func003, "expected FUNC003 but got: {:?}", report);
     }
 }

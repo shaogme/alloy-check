@@ -126,7 +126,12 @@ impl<'ast> Visit<'ast> for NestingVisitor {
     }
 }
 
-pub(crate) fn extract_single_call(block: &syn::Block) -> Option<&syn::ExprCall> {
+pub(crate) enum CallVariant<'a> {
+    Call(&'a syn::ExprCall),
+    MethodCall(&'a syn::ExprMethodCall),
+}
+
+pub(crate) fn extract_single_call(block: &syn::Block) -> Option<CallVariant<'_>> {
     let mut call_expr = None;
     let mut non_use_stmts = 0;
 
@@ -150,10 +155,10 @@ pub(crate) fn extract_single_call(block: &syn::Block) -> Option<&syn::ExprCall> 
         None => None,
     };
 
-    if let Some(syn::Expr::Call(call)) = inner_expr {
-        Some(call)
-    } else {
-        None
+    match inner_expr {
+        Some(syn::Expr::Call(call)) => Some(CallVariant::Call(call)),
+        Some(syn::Expr::MethodCall(method)) => Some(CallVariant::MethodCall(method)),
+        _ => None,
     }
 }
 

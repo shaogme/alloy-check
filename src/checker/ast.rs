@@ -1,3 +1,4 @@
+pub mod index;
 pub mod utils;
 pub mod visitor;
 
@@ -8,6 +9,7 @@ use anyhow::Result;
 use rayon::prelude::*;
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 use syn::visit::Visit;
 use walkdir::WalkDir;
 
@@ -22,11 +24,13 @@ pub fn check(ctx: &Ctx, report: &mut Report) -> Result<()> {
         .filter(|p| p.extension().is_some_and(|s| s == "rs"))
         .collect();
 
+    let index = build_index(ctx, &paths)?;
+
     let diags: Vec<_> = paths
         .into_par_iter()
         .flat_map(|path| {
             let mut local_report = Report::new();
-            if let Err(e) = process_rs_file(ctx, &mut local_report, &path) {
+            if let Err(e) = process_rs_file(ctx, &mut local_report, &path, &index) {
                 local_report.add(Diag::error(
                     path.clone(),
                     1,
@@ -43,7 +47,82 @@ pub fn check(ctx: &Ctx, report: &mut Report) -> Result<()> {
     Ok(())
 }
 
-fn process_rs_file(ctx: &Ctx, report: &mut Report, path: &Path) -> Result<()> {
+fn build_index(ctx: &Ctx, paths: &[PathBuf]) -> Result<index::SymbolIndex> {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Mutex;
+
+    let free_fns = Mutex::new(HashMap::<String, HashSet<String>>::new());
+    let inherent_methods = Mutex::new(HashMap::<String, HashSet<String>>::new());
+    let trait_methods = Mutex::new(HashSet::<String>::new());
+
+    paths.par_iter().try_for_each(|path| -> Result<()> {
+        let pkg = ctx.find_package(path);
+        let Some(package) = pkg else {
+            return Ok(());
+        };
+        if ctx.is_ignored(package, path) {
+            return Ok(());
+        }
+
+        let content = fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("Failed to read file {:?}: {}", path, e))?;
+        let syntax = syn::parse_file(&content)
+            .map_err(|e| anyhow::anyhow!("Failed to parse file {:?}: {}", path, e))?;
+
+        let mut local_fns = HashSet::new();
+        let mut local_inherent = HashSet::new();
+        let mut local_trait = HashSet::new();
+        let mut visitor = index::IndexVisitor {
+            free_fns: &mut local_fns,
+            inherent_methods: &mut local_inherent,
+            trait_methods: &mut local_trait,
+        };
+        visitor.visit_file(&syntax);
+
+        if !local_fns.is_empty() {
+            let mut lock = free_fns
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Free fns mutex poisoned: {}", e))?;
+            lock.entry(package.name.to_string())
+                .or_default()
+                .extend(local_fns);
+        }
+        if !local_inherent.is_empty() {
+            let mut lock = inherent_methods
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Inherent methods mutex poisoned: {}", e))?;
+            lock.entry(package.name.to_string())
+                .or_default()
+                .extend(local_inherent);
+        }
+        if !local_trait.is_empty() {
+            let mut lock = trait_methods
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Trait methods mutex poisoned: {}", e))?;
+            lock.extend(local_trait);
+        }
+        Ok(())
+    })?;
+
+    Ok(index::SymbolIndex {
+        free_fns: free_fns
+            .into_inner()
+            .map_err(|e| anyhow::anyhow!("Free fns mutex poisoned: {}", e))?,
+        inherent_methods: inherent_methods
+            .into_inner()
+            .map_err(|e| anyhow::anyhow!("Inherent methods mutex poisoned: {}", e))?,
+        trait_methods: trait_methods
+            .into_inner()
+            .map_err(|e| anyhow::anyhow!("Trait methods mutex poisoned: {}", e))?,
+    })
+}
+
+fn process_rs_file(
+    ctx: &Ctx,
+    report: &mut Report,
+    path: &Path,
+    index: &index::SymbolIndex,
+) -> Result<()> {
     if is_prohibited_mod_rs(ctx, path) {
         report.add(
             Diag::error(
@@ -57,13 +136,10 @@ fn process_rs_file(ctx: &Ctx, report: &mut Report, path: &Path) -> Result<()> {
         );
     }
 
-    if ctx
-        .find_package(path)
-        .filter(|p| !ctx.is_ignored(p, path))
-        .is_none()
-    {
+    let pkg = ctx.find_package(path);
+    let Some(package) = pkg.filter(|p| !ctx.is_ignored(p, path)) else {
         return Ok(());
-    }
+    };
 
     let content = match read_file_content(path, report) {
         Some(c) => c,
@@ -71,7 +147,7 @@ fn process_rs_file(ctx: &Ctx, report: &mut Report, path: &Path) -> Result<()> {
     };
 
     check_file_length(path, &content, report);
-    parse_and_visit(path, &content, report);
+    parse_and_visit(path, &content, report, package.name.to_string(), index);
 
     Ok(())
 }
@@ -122,10 +198,16 @@ fn check_file_length(path: &Path, content: &str, report: &mut Report) {
     }
 }
 
-fn parse_and_visit(path: &Path, content: &str, report: &mut Report) {
+fn parse_and_visit(
+    path: &Path,
+    content: &str,
+    report: &mut Report,
+    package_name: String,
+    index: &index::SymbolIndex,
+) {
     match syn::parse_file(content) {
         Ok(syntax) => {
-            let mut visitor = AstVisitor::new(report, path, content);
+            let mut visitor = AstVisitor::new(report, path, content, package_name, index);
             visitor.visit_file(&syntax);
         }
         Err(e) => {
