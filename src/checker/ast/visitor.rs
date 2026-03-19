@@ -14,6 +14,7 @@ pub(crate) struct AstVisitor<'a> {
     pub in_test_ctx: bool,
     pub in_trait_impl: bool,
     pub in_const_ctx: bool,
+    pub checking_stmt_value: bool,
 }
 
 impl<'a> AstVisitor<'a> {
@@ -26,19 +27,45 @@ impl<'a> AstVisitor<'a> {
             in_test_ctx: false,
             in_trait_impl: false,
             in_const_ctx: false,
+            checking_stmt_value: false,
         }
     }
 
-    fn check_blk_safety(&mut self, span: proc_macro2::Span) {
+    fn check_blk_safety(&mut self, span: proc_macro2::Span, outer_span: Option<proc_macro2::Span>) {
         let line = span.start().line;
-        if line <= 1 {
+        let outer_line = outer_span.map(|s| s.start().line).unwrap_or(line);
+
+        if outer_line <= 1 {
+            self.report_missing_safety(span);
             return;
         }
-        let lines: Vec<&str> = self.source_text.lines().collect();
-        let mut found_safety = false;
 
-        for j in (0..line - 1).rev() {
-            let l = lines[j].trim();
+        let lines: Vec<&str> = self.source_text.lines().collect();
+
+        // Check for misplaced safety comment between outer_line and line
+        if outer_line < line {
+            for l in &lines[outer_line - 1..line - 1] {
+                let l = l.trim();
+                if l.starts_with("//") && !l.starts_with("///") && l.contains("SAFETY:") {
+                    let start = span.start();
+                    self.report.add(
+                        Diag::error(
+                            self.current_file.to_path_buf(),
+                            start.line,
+                            start.column,
+                            "SAFE004",
+                            "Misplaced `// SAFETY:` comment inside a statement.",
+                        )
+                        .with_suggestion("Move the `// SAFETY:` comment above the entire statement (e.g., above the `let` keyword)."),
+                    );
+                    return;
+                }
+            }
+        }
+
+        let mut found_safety = false;
+        for l in lines[0..outer_line - 1].iter().rev() {
+            let l = l.trim();
             if l.is_empty() {
                 continue;
             }
@@ -55,18 +82,24 @@ impl<'a> AstVisitor<'a> {
         }
 
         if !found_safety {
-            let start = span.start();
-            self.report.add(
-                Diag::error(
-                    self.current_file.to_path_buf(),
-                    start.line,
-                    start.column,
-                    "SAFE003",
-                    "Missing `// SAFETY:` comment above unsafe item or block.",
-                )
-                .with_suggestion("Add `// SAFETY: [reason]` to document why this implementation or block is safe."),
-            );
+            self.report_missing_safety(span);
         }
+    }
+
+    fn report_missing_safety(&mut self, span: proc_macro2::Span) {
+        let start = span.start();
+        self.report.add(
+            Diag::error(
+                self.current_file.to_path_buf(),
+                start.line,
+                start.column,
+                "SAFE003",
+                "Missing `// SAFETY:` comment above unsafe item or block.",
+            )
+            .with_suggestion(
+                "Add `// SAFETY: [reason]` to document why this implementation or block is safe.",
+            ),
+        );
     }
 
     fn check_item_safety(&mut self, attrs: &[syn::Attribute], span: proc_macro2::Span) {
@@ -424,8 +457,36 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         visit::visit_macro(self, i);
     }
 
+    fn visit_local(&mut self, i: &'ast syn::Local) {
+        if let Some(init) = &i.init
+            && let syn::Expr::Unsafe(u) = &*init.expr
+        {
+            let prev = self.checking_stmt_value;
+            self.checking_stmt_value = true;
+            self.check_blk_safety(u.span(), Some(i.span()));
+            visit::visit_local(self, i);
+            self.checking_stmt_value = prev;
+        } else {
+            visit::visit_local(self, i);
+        }
+    }
+
+    fn visit_expr_assign(&mut self, i: &'ast syn::ExprAssign) {
+        if let syn::Expr::Unsafe(u) = &*i.right {
+            let prev = self.checking_stmt_value;
+            self.checking_stmt_value = true;
+            self.check_blk_safety(u.span(), Some(i.span()));
+            visit::visit_expr_assign(self, i);
+            self.checking_stmt_value = prev;
+        } else {
+            visit::visit_expr_assign(self, i);
+        }
+    }
+
     fn visit_expr_unsafe(&mut self, i: &'ast syn::ExprUnsafe) {
-        self.check_blk_safety(i.span());
+        if !self.checking_stmt_value {
+            self.check_blk_safety(i.span(), None);
+        }
         visit::visit_expr_unsafe(self, i);
     }
 
@@ -467,17 +528,33 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
     }
 
     fn visit_item_const(&mut self, i: &'ast syn::ItemConst) {
-        let prev = self.in_const_ctx;
+        let prev_const = self.in_const_ctx;
         self.in_const_ctx = true;
-        visit::visit_item_const(self, i);
-        self.in_const_ctx = prev;
+        if let syn::Expr::Unsafe(u) = &*i.expr {
+            let prev_stmt = self.checking_stmt_value;
+            self.checking_stmt_value = true;
+            self.check_blk_safety(u.span(), Some(i.span()));
+            visit::visit_item_const(self, i);
+            self.checking_stmt_value = prev_stmt;
+        } else {
+            visit::visit_item_const(self, i);
+        }
+        self.in_const_ctx = prev_const;
     }
 
     fn visit_item_static(&mut self, i: &'ast syn::ItemStatic) {
-        let prev = self.in_const_ctx;
+        let prev_const = self.in_const_ctx;
         self.in_const_ctx = true;
-        visit::visit_item_static(self, i);
-        self.in_const_ctx = prev;
+        if let syn::Expr::Unsafe(u) = &*i.expr {
+            let prev_stmt = self.checking_stmt_value;
+            self.checking_stmt_value = true;
+            self.check_blk_safety(u.span(), Some(i.span()));
+            visit::visit_item_static(self, i);
+            self.checking_stmt_value = prev_stmt;
+        } else {
+            visit::visit_item_static(self, i);
+        }
+        self.in_const_ctx = prev_const;
     }
 
     fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
@@ -499,7 +576,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             );
         }
         if i.unsafety.is_some() {
-            self.check_blk_safety(i.span());
+            self.check_blk_safety(i.span(), None);
         }
         visit::visit_item_impl(self, i);
         self.in_trait_impl = prev;

@@ -133,7 +133,7 @@
 - 除非底层性能优化或外部 FFI 调用，否则严禁使用 `unsafe` 块。
 - 使用 `unsafe` 时，必须在其上方提供安全性理由：
   - **API 级 Unsafe (如 `unsafe fn` 定义、`unsafe trait` 定义)**：必须通过 `/// # Safety` 章节进行文档化（符合 Clippy 标准）。
-  - **实现级 Unsafe (如 `unsafe impl` 声明、函数内 `unsafe` 块)**：必须在上方添加 `// SAFETY:` 注释说明。
+  - **实现级 Unsafe (如 `unsafe impl` 声明、函数内 `unsafe` 块)**：必须在上方添加 `// SAFETY:` 注释说明。如果 `unsafe` 是语句的主值（如在 `let` 绑定或赋值中），注释应置于该语句上方。
 
 ## 6. 文档与元数据 (Documentation & Metadata)
 
@@ -215,6 +215,7 @@
 - **SAFE001**: 在非测试代码中使用了 `unwrap()` 或 `expect()`。
 - **SAFE002**: 在非测试代码中调用了 `panic!`、`core::panic!` 等引发非预期恐慌的宏。
 - **SAFE003**: 代码中含 `unsafe` 块或声明，但未提供充足说明。API 定义需 `/// # Safety` 文档章节，实现/逻辑块需 `// SAFETY:` 注释。
+- **SAFE004**: `// SAFETY:` 注释位置不当。如果 `unsafe` 块是语句（如 `let`、赋值、`const` 或 `static`）的主值，注释必须放在该语句之前，严禁夹在语句中间。
 - **DOC001**: 声明为 `pub` 的接口缺少 Rustdoc (`///` 或 `#[doc]`) 或潜在的文档生成宏。
 - **ID001**: 标识符（如函数名、变量名）长度过长。
 - **FILE001**: 单个源文件总行数超过 800 行。
