@@ -367,11 +367,28 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
             }
         }
 
+        let mut seen_mod = false;
         let mut seen_use = false;
         let mut seen_other = false;
         for item in &i.items {
             match item {
+                syn::Item::ExternCrate(_) => {
+                    if seen_mod || seen_use || seen_other {
+                        let s = item.span().start();
+                        self.report.add(
+                            Diag::error(
+                                self.current_file.to_path_buf(),
+                                s.line,
+                                s.column,
+                                "PATH002",
+                                "`extern crate` statements must be placed before `mod`, `use` and other items.",
+                            )
+                            .with_suggestion("Move this `extern crate` statement further up."),
+                        );
+                    }
+                }
                 syn::Item::Mod(m) if m.content.is_none() && !has_test_attr(&m.attrs) => {
+                    seen_mod = true;
                     if seen_use || seen_other {
                         let s = item.span().start();
                         self.report.add(
@@ -382,7 +399,7 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
                                 "PATH002",
                                 "`mod` statements must be placed before `use` and other items.",
                             )
-                            .with_suggestion("Move this `mod` statement further up."),
+                            .with_suggestion("Move this `mod` statement further up (after `extern crate` if any)."),
                         );
                     }
                 }
@@ -912,5 +929,34 @@ impl Foo {
 
         let has_func003 = report.diagnostics.iter().any(|d| d.code == "FUNC003");
         assert!(has_func003, "expected FUNC003 but got: {:?}", report);
+    }
+
+    #[test]
+    fn extern_crate_after_mod_should_trigger_path002() {
+        let src = r#"
+pub mod common;
+extern crate other;
+"#;
+        let file = syn::parse_file(src).expect("source should parse");
+        let mut report = Report::new();
+        let index = SymbolIndex::default();
+        let mut visitor = AstVisitor::new(
+            &mut report,
+            Path::new("src/lib.rs"),
+            src,
+            "test".to_string(),
+            &index,
+        );
+        visitor.visit_file(&file);
+
+        let has_path002 = report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "PATH002" && d.message.contains("extern crate"));
+        assert!(
+            has_path002,
+            "expected PATH002 for extern crate but got: {:?}",
+            report
+        );
     }
 }
