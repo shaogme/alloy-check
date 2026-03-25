@@ -22,10 +22,10 @@ jobs:
             name: alloy-check-linux-arm64
           - os: macos-latest
             target: x86_64-apple-darwin
-            name: alloy-check-darwin-amd64
+            name: alloy-check-macos-amd64
           - os: macos-latest
             target: aarch64-apple-darwin
-            name: alloy-check-darwin-arm64
+            name: alloy-check-macos-arm64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             name: alloy-check-windows-amd64.exe

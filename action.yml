@@ -1,0 +1,54 @@
+name: 'Setup Alloy Check'
+description: 'Install alloy-check binary'
+inputs:
+  version:
+    description: 'The tag version of alloy-check to install (e.g., stable, v1.0.0)'
+    required: false
+    default: 'stable'
+runs:
+  using: 'composite'
+  steps:
+    - name: Download and Install alloy-check
+      shell: bash
+      run: |
+        set -e
+        
+        OS="${{ runner.os }}"
+        ARCH="${{ runner.arch }}"
+        
+        case "$OS" in
+          Linux) PLATFORM="linux" ;;
+          macOS) PLATFORM="macos" ;;
+          Windows) PLATFORM="windows" ;;
+          *) echo "Unsupported OS: $OS"; exit 1 ;;
+        esac
+        
+        case "$ARCH" in
+          X64) ARCH_NAME="amd64" ;;
+          ARM64) ARCH_NAME="arm64" ;;
+          *) echo "Unsupported Arch: $ARCH"; exit 1 ;;
+        esac
+        
+        BINARY_NAME="alloy-check-${PLATFORM}-${ARCH_NAME}"
+        EXE=""
+        if [ "$PLATFORM" == "windows" ]; then
+          BINARY_NAME="${BINARY_NAME}.exe"
+          EXE=".exe"
+        fi
+        
+        TAG="${{ inputs.version }}"
+        URL="https://github.com/shaogme/alloy-check/releases/download/${TAG}/${BINARY_NAME}"
+        
+        INSTALL_DIR="${HOME}/.alloy-check/bin"
+        mkdir -p "${INSTALL_DIR}"
+        
+        echo "Downloading alloy-check ${TAG} for ${PLATFORM}-${ARCH_NAME}..."
+        curl -SLf --retry 3 --retry-all-errors -o "${INSTALL_DIR}/alloy-check${EXE}" "$URL"
+        
+        if [ "$PLATFORM" != "windows" ]; then
+          chmod +x "${INSTALL_DIR}/alloy-check"
+        fi
+        
+        echo "${INSTALL_DIR}" >> $GITHUB_PATH
+        echo "alloy-check installed successfully to ${INSTALL_DIR}"
+        echo "You can now use 'alloy-check' command."

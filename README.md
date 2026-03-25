@@ -20,11 +20,22 @@ This tool implements rule definitions found in [SPECIFICATION.md](SPECIFICATION.
 
 ## Installation
 
+### Local Installation
 You can run `alloy-check` inside any cargo project.
 
 ```sh
 cargo install --path .
 ```
+
+### GitHub Action
+To use `alloy-check` in your GitHub Workflows:
+
+```yaml
+- name: Setup Alloy Check
+  uses: shaogme/alloy-check@main
+```
+
+Then you can use the `alloy-check` command directly in subsequent steps.
 
 ## Usage
 
