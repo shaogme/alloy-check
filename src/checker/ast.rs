@@ -227,8 +227,24 @@ fn parse_and_visit(
 
 fn is_prohibited_mod_rs(ctx: &Ctx, path: &Path) -> bool {
     let is_mod = path.file_name().and_then(|n| n.to_str()) == Some("mod.rs");
-    is_mod
-        && ctx
-            .find_package(path)
-            .is_some_and(|p| !ctx.is_ignored(p, path))
+    if !is_mod {
+        return false;
+    }
+
+    if !ctx.find_package(path).is_some_and(|p| !ctx.is_ignored(p, path)) {
+        return false;
+    }
+
+    // 获取相对于工作区根目录的路径
+    let rel_path = path.strip_prefix(&ctx.root).unwrap_or(path);
+    let p_str = rel_path.to_str().unwrap_or("").replace('\\', "/");
+    let components: Vec<&str> = p_str.split('/').collect();
+
+    let in_src = components.iter().any(|&c| c == "src");
+    let in_tests = components.iter().any(|&c| c == "tests");
+    let in_benches = components.iter().any(|&c| c == "benches");
+
+    // 允许在 tests/ 或 benches/ 下使用，除非路径中包含 src/
+    let allowed = (in_tests || in_benches) && !in_src;
+    !allowed
 }

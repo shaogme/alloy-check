@@ -362,7 +362,13 @@ impl<'ast> Visit<'ast> for AstVisitor<'_> {
         // 2. 检查文件路径，如果位于 tests/ 或 benches/ 目录下，视为测试环境
         if let Some(path_str) = self.current_file.to_str() {
             let normalized = path_str.replace('\\', "/");
-            if normalized.contains("/tests/") || normalized.contains("/benches/") {
+            if normalized.contains("/tests/")
+                || normalized.starts_with("tests/")
+                || normalized.starts_with("./tests/")
+                || normalized.contains("/benches/")
+                || normalized.starts_with("benches/")
+                || normalized.starts_with("./benches/")
+            {
                 self.in_test_ctx = true;
             }
         }

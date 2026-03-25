@@ -66,6 +66,8 @@
 ### 2.3 禁止使用 `mod.rs`
 - 严禁在项目中使用旧版的 `mod.rs` 模式进行模块声明。
 - **推荐做法**：使用与目录同名的 `.rs` 文件。例如，若有目录 `src/network/`，应使用 `src/network.rs` 而非 `src/network/mod.rs`。
+- **允许特例**：在项目根目录下的 `tests/**/` 和 `benches/**/` 下允许使用 `mod.rs`。
+- **注意**：如果测试或基准目录位于 `src/` 下（即 `src/**/tests/**` 或 `src/**/benches/**`），则依然**禁止**使用 `mod.rs`。
 
 ## 3. 函数与逻辑设计 (Function Design)
 
